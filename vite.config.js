@@ -11,7 +11,7 @@ export default defineConfig({
  manifest: {
   name: 'Eshaa Physio Care',
   short_name: 'EshaaPhysio',
-  theme_color: '#2563eb',
+  theme_color: '#166534',
   background_color: '#f8fafc',
   display: 'standalone',
   icons: [
