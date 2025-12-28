@@ -37,6 +37,15 @@ export default function TherapistDashboard() {
 
   useEffect(() => { fetchData(); }, []);
 
+  useEffect(() => {
+  const loadData = async () => {
+    // Add a check to wait for auth to be ready
+    if (!auth.currentUser) return; 
+    await fetchData();
+  };
+  loadData();
+}, []);
+
   const handleAssignExercise = async (e) => {
     e.preventDefault();
     await addDoc(collection(db, "exercises"), { ...exerciseForm, patient_id: selectedPatient.id });
@@ -44,17 +53,43 @@ export default function TherapistDashboard() {
     setSelectedPatient(null);
   };
 
-  const handleAddBill = async (e) => {
-    e.preventDefault();
-    await addDoc(collection(db, "payments"), { 
-      ...billForm,       patient_id: selectedPatient.id, 
-      date: new Date().toISOString().split('T')[0] 
-    });
-    alert("Bill Generated!");
+ const handleAddBill = async (e) => {
+  e.preventDefault();
+  console.log("Submit button clicked!"); // Check if this shows in F12 console
+
+  if (!selectedPatient) {
+    alert("No patient selected!");
+    return;
+  }
+
+  try {
+    const billData = {
+      amount: billForm.amount,
+      status: billForm.status || 'Pending',
+      patient_id: selectedPatient.id,
+      patient_name: selectedPatient.full_name, // Added for easier tracking
+      date: new Date().toISOString().split('T')[0] // YYYY-MM-DD
+    };
+
+    console.log("Attempting to save bill:", billData);
+
+    const docRef = await addDoc(collection(db, "payments"), billData);
+    
+    console.log("Bill saved with ID:", docRef.id);
+    alert("Bill Created Successfully!");
+
+    // Close Modal and Reset
     setShowBillModal(false);
     setSelectedPatient(null);
-  };
+    setBillForm({ amount: '', status: 'Pending' });
 
+    // Refresh the charts/data
+    fetchData(); 
+  } catch (error) {
+    console.error("Firebase Error:", error);
+    alert("Error: " + error.message);
+  }
+};
   return (
     <div className="min-h-screen bg-gray-50 p-4 lg:p-8 font-sans max-w-6xl mx-auto space-y-6">
       <div className="flex justify-between items-center bg-white p-6 rounded-3xl shadow-sm border border-green-100">
@@ -114,18 +149,44 @@ export default function TherapistDashboard() {
 
       {/* Billing Modal */}
       {showBillModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-6 z-50">
-          <form onSubmit={handleAddBill} className="bg-white p-8 rounded-3xl w-full max-w-md space-y-4">
-            <h3 className="font-bold text-xl">Generate Bill: {selectedPatient.full_name}</h3>
-            <input required placeholder="Amount (₹)" type="number" className="w-full p-4 bg-gray-50 rounded-2xl border-none" onChange={e => setBillForm({...billForm, amount: e.target.value})} />
-            <select className="w-full p-4 bg-gray-50 rounded-2xl border-none" onChange={e => setBillForm({...billForm, status: e.target.value})}>
-              <option value="Pending">Pending</option>
-              <option value="Paid">Paid</option>
-            </select>
-            <button type="submit" className="w-full bg-yellow-400 text-green-900 p-4 rounded-2xl font-bold">Create Bill</button>
-            <button type="button" onClick={() => {setShowBillModal(false); setSelectedPatient(null);}} className="w-full text-gray-400">Cancel</button>
-          </form>
-        </div>
-      )}
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-6 z-[100]">
+    {/* Ensure onSubmit is on the FORM tag */}
+    <form onSubmit={handleAddBill} className="bg-white p-8 rounded-3xl w-full max-w-md space-y-4 shadow-2xl">
+      <h3 className="font-bold text-xl text-green-800">Generate Bill for {selectedPatient?.full_name}</h3>      
+      <div className="space-y-2">
+        <label className="text-xs font-bold text-gray-400 uppercase">Amount (₹)</label>
+        <input 
+          required 
+          type="number" 
+          placeholder="e.g. 500" 
+          className="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 ring-green-800"
+          value={billForm.amount}
+          onChange={e => setBillForm({...billForm, amount: e.target.value})} 
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs font-bold text-gray-400 uppercase">Status</label>
+        <select 
+          className="w-full p-4 bg-gray-50 rounded-2xl border-none outline-none focus:ring-2 ring-green-800"
+          value={billForm.status}
+          onChange={e => setBillForm({...billForm, status: e.target.value})}
+        >
+          <option value="Pending">Pending</option>
+          <option value="Paid">Paid</option>
+        </select>
+      </div>
+
+      <div className="flex gap-3 pt-4">
+        {/* Ensure this is type="submit" */}
+        <button type="submit" className="flex-1 bg-green-800 text-white p-4 rounded-2xl font-bold shadow-lg">
+          Create Bill
+        </button>
+        <button type="button" onClick={() => {setShowBillModal(false); setSelectedPatient(null);}} className="flex-1 bg-gray-100 p-4 rounded-2xl font-bold">
+          Cancel
+        </button>
+      </div>    </form>
+  </div>
+)}
     </div>  );
 }
