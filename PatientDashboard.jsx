@@ -108,6 +108,19 @@ const handleBooking = async (e) => {
         </div>
       </div>
        <h3 className="font-bold text-gray-800 text-lg mt-8 flex items-center">
+
+{/* Header Card */}
+<div className="bg-green-800 text-white p-6 rounded-3xl shadow-xl">
+  <h2 className="text-2xl font-bold">Hello, {profile?.full_name}</h2></div>
+
+{/* Buttons */}
+<button onClick={() => setShowBooking(true)} className="bg-yellow-400 text-green-900 p-5 rounded-2xl shadow-sm border-none flex flex-col items-center">
+  <Calendar className="mb-2" size={24}/>
+  <span className="text-xs font-bold">Book Appt</span>
+</button>
+
+
+
   <CreditCard className="mr-2 text-green-600" size={18}/> Payment History
 </h3>
 <div className="space-y-3 mt-3">
