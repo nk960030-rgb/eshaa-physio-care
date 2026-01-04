@@ -3,15 +3,31 @@ import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { Activity, Calendar, CreditCard, LogOut, CheckCircle, PlayCircle } from 'lucide-react';
+import { IndianRupee, Download } from 'lucide-react';
+
 
 export default function PatientDashboard() {
   const [exercises, setExercises] = useState([]);
   const [payments, setPayments] = useState([]);
   const [profile, setProfile] = useState(null);
+  const totalPaid = payments.filter(p => p.status === 'Paid').reduce((sum, p) => sum + Number(p.amount), 0);
+
+
+  // 1. Helper function to fix YouTube links
+  const getYouTubeEmbedUrl = (url) => {
+    if (!url) return "";
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) 
+      ? `https://www.youtube.com/embed/${match[2]}` 
+      : url;
+  };
 
   useEffect(() => {
     const fetchData = async () => {
       const user = auth.currentUser;
+      if (!user) return;
+
       const profSnap = await getDoc(doc(db, "profiles", user.uid));
       setProfile(profSnap.data());
 
@@ -44,33 +60,58 @@ export default function PatientDashboard() {
               <h4 className="font-bold text-gray-900">{ex.name}</h4>
               <CheckCircle className="text-green-100" />
             </div>
+            
             {ex.videoUrl && (
               <div className="aspect-video bg-gray-100 rounded-2xl overflow-hidden relative group">
                 <iframe 
                   className="w-full h-full" 
-                  src={ex.videoUrl.replace("watch?v=", "embed/")} 
+                  /* 2. We use the helper function here to ensure the URL works */
+                  src={getYouTubeEmbedUrl(ex.videoUrl)} 
                   title="Exercise Video"
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
                 ></iframe>
               </div>
             )}
+            
             <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">{ex.sets} Sets • {ex.reps} Reps</p>
           </div>
         ))}
       </div>
+<div className="flex justify-between items-end pt-4">
+        <h3 className="font-bold text-gray-800 flex items-center"><CreditCard className="mr-2 text-yellow-500"/> Billing & History</h3>
+        <p className="text-[10px] font-bold text-gray-400">TOTAL PAID: ₹{totalPaid}</p>
+      </div>
 
-      <h3 className="font-bold text-gray-800 flex items-center pt-4"><CreditCard className="mr-2 text-yellow-500"/> Billing & Payments</h3>
-      <div className="space-y-3">        {payments.map(p => (
-          <div key={p.id} className="bg-white p-4 rounded-2xl border flex justify-between items-center">
-            <div>
-              <p className="font-bold text-sm">Consultation Fee</p>
-              <p className="text-[10px] text-gray-400">{p.date}</p>
+      <div className="space-y-3">
+        {payments.length > 0 ? payments.map(p => (
+          <div key={p.id} className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm flex justify-between items-center group active:scale-95 transition-transform">
+            <div className="flex items-center space-x-3">
+              <div className={`p-3 rounded-2xl ${p.status === 'Paid' ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>
+                <IndianRupee size={18} />
+              </div>
+              <div>
+                <p className="font-bold text-sm text-gray-800">Consultation Fee</p>
+                <div className="flex items-center text-[10px] text-gray-400 space-x-2">
+                  <span>{p.date}</span>
+                  <span>•</span>
+                  <span>{p.method || 'Online'}</span>
+                </div>
+              </div>
             </div>
-            <div className="text-right">              <p className="font-bold text-green-800">₹{p.amount}</p>
-              <span className={`text-[10px] font-black ${p.status === 'Paid' ? 'text-green-500' : 'text-orange-500'}`}>{p.status.toUpperCase()}</span>
+            <div className="text-right">
+              <p className="font-black text-gray-900">₹{p.amount}</p>
+              <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase ${
+                p.status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+              }`}>
+                {p.status}
+              </span>
             </div>
           </div>
-        ))}
+        )) : (
+          <p className="text-center text-gray-400 text-xs py-4">No payment records found.</p>
+        )}
       </div>
     </div>
   );
