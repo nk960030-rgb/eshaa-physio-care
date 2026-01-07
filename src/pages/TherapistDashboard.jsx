@@ -2,251 +2,236 @@ import React, { useEffect, useState } from 'react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { collection, getDocs, query, where, addDoc, orderBy } from 'firebase/firestore';
-import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
-import { Users, LogOut, CreditCard, Video, Clock, Search, Calendar, Filter, Trash2 } from 'lucide-react';
+import { collection, getDocs, query, where, addDoc, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { Users, LogOut, CreditCard, Search, Calendar, MessageSquare, Activity, IndianRupee, Trash2, FileText, Clock, X } from 'lucide-react';
 
 export default function TherapistDashboard() {
   const navigate = useNavigate();
   const [patients, setPatients] = useState([]);
   const [allPayments, setAllPayments] = useState([]);
-  const [realIncome, setRealIncome] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
-  const [showBillModal, setShowBillModal] = useState(false);
+  const [patientExercises, setPatientExercises] = useState([]);
   
-  // 1. Search & Filter States
+  const [modalType, setModalType] = useState(null); 
+  const [activeReceipt, setActiveReceipt] = useState(null);
+  
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateSearch, setDateSearch] = useState(''); // For searching specific dates
-  
-  const [exerciseForm, setExerciseForm] = useState({ name: '', sets: '', reps: '', duration: '', videoUrl: '' });
-  const [billForm, setBillForm] = useState({ 
-    amount: '', 
-    status: 'Paid', 
-    method: 'GPay', 
-    date: new Date().toISOString().split('T')[0] // Default to today
-  });
+  const [dateSearch, setDateSearch] = useState(''); 
+  const [progressNote, setProgressNote] = useState("");
+  const [appointment, setAppointment] = useState({ date: '', time: '' });
+  const [exerciseForm, setExerciseForm] = useState({ name: '', sets: '', reps: '', videoUrl: '' });
+  const [billForm, setBillForm] = useState({ amount: '', status: 'Paid', method: 'GPay', date: new Date().toISOString().split('T')[0] });
+
+  const today = new Date().toISOString().split('T')[0];
 
   const fetchData = async () => {
     try {
       const pSnap = await getDocs(query(collection(db, "profiles"), where("role", "==", "patient")));
       setPatients(pSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
       const paySnap = await getDocs(query(collection(db, "payments"), orderBy("date", "desc")));
-      const payList = paySnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAllPayments(payList);
-
-      const monthlyData = payList.reduce((acc, curr) => {
-        if (!curr.date) return acc;
-        const month = curr.date.split('-')[1]; 
-        acc[month] = (acc[month] || 0) + Number(curr.amount);
-        return acc;
-      }, {});
-      setRealIncome(Object.keys(monthlyData).map(k => ({ month: k, total: monthlyData[k] })));
-    } catch (err) { console.error(err); }
+      setAllPayments(paySnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    } catch (err) { console.error("Fetch error:", err); }
   };
 
   useEffect(() => { if (auth.currentUser) fetchData(); }, []);
 
-  // 2. Logic: Search by Name or ID
-  const filteredPatients = patients.filter(p => 
-    p.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.id?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Helper to load exercises for a patient
+  const loadExercises = async (patientId) => {
+    const q = query(collection(db, "exercises"), where("patient_id", "==", patientId));
+    const snap = await getDocs(q);
+    setPatientExercises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  };
 
-  // 3. Logic: Filter Records by Date and Name
-  const filteredRecords = allPayments.filter(r => {
-    const matchesDate = dateSearch ? r.date === dateSearch : true;
-    const matchesName = searchTerm ? r.patient_name?.toLowerCase().includes(searchTerm.toLowerCase()) : true;
-    return matchesDate && matchesName;
-  });
+  const openModal = (type, patient) => {
+    setSelectedPatient(patient);
+    setModalType(type);
+    if (type === 'exercise') loadExercises(patient.id);
+  };
 
-  // 4. Logic: Calculate Summary for Filtered Results
-  const totalRevenue = filteredRecords.reduce((sum, r) => sum + Number(r.amount), 0);
+  const deleteExercise = async (exId) => {
+    if (!selectedPatient) return;
+    try {
+      await deleteDoc(doc(db, "exercises", exId));
+      // Refresh the specific list after deletion
+      loadExercises(selectedPatient.id);
+    } catch (err) { alert("Delete failed: " + err.message); }
+  };
 
   const handleAddBill = async (e) => {
     e.preventDefault();
-    await addDoc(collection(db, "payments"), {
-      ...billForm,
-      patient_id: selectedPatient.id,
+    if (!selectedPatient) return;
+    await addDoc(collection(db, "payments"), { 
+      ...billForm, 
+      patient_id: selectedPatient.id, 
       patient_name: selectedPatient.full_name,
-      patient_age: selectedPatient.age,
-      patient_gender: selectedPatient.gender,
-      patient_condition: selectedPatient.condition
+      patient_condition: selectedPatient.condition || 'General'
     });
-    setShowBillModal(false);
+    setModalType(null);
     fetchData();
   };
 
+  const handleSaveNote = async (e) => {
+    e.preventDefault();
+    if (!selectedPatient) return;
+    await addDoc(collection(db, "notes"), { 
+      patient_id: selectedPatient.id, 
+      patient_name: selectedPatient.full_name, 
+      note: progressNote, 
+      date: today, 
+      timestamp: new Date() 
+    });
+    setModalType(null);
+    setProgressNote("");
+    alert("Note saved!");
+  };
+
+  const handleSchedule = async (e) => {
+    e.preventDefault();
+    if (!selectedPatient) return;
+    await updateDoc(doc(db, "profiles", selectedPatient.id), {
+      nextSession: { date: appointment.date, time: appointment.time }
+    });
+    setModalType(null);
+    fetchData();
+  };
+
+  const handlePrint = (record) => { setActiveReceipt(record); setTimeout(() => { window.print(); setActiveReceipt(null); }, 500); };
+
+  const filteredPatients = patients.filter(p => p.full_name?.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredRecords = allPayments.filter(r => (dateSearch ? r.date === dateSearch : true) && (searchTerm ? r.patient_name?.toLowerCase().includes(searchTerm.toLowerCase()) : true));
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-4 lg:p-8 font-sans max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-[#F8FAFC] p-4 lg:p-8 font-sans max-w-6xl mx-auto space-y-6 print:p-0">
       
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 gap-4">
-        <div className="w-full md:w-auto">
-          <h1 className="text-2xl font-black text-green-900 tracking-tight">Eshaa Console</h1>
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">Therapist Admin</p>
-        </div>
-        
-        {/* Search Bar (Point 3) */}
+      {/* Header (Hidden on Print) */}
+      <div className="print:hidden flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 gap-4">
+        <h1 className="text-2xl font-black text-green-900 italic">Eshaa Console</h1>
         <div className="relative w-full md:w-96">
           <Search className="absolute left-4 top-3.5 text-slate-300" size={18}/>
-          <input 
-            type="text" 
-            placeholder="Search Patient Name or ID..." 
-            className="w-full pl-12 pr-4 py-3 bg-slate-50 rounded-2xl border-none focus:ring-2 ring-green-500 transition-all font-medium"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+          <input type="text" placeholder="Search Patients..." className="w-full pl-12 pr-4 py-3 bg-slate-50 rounded-2xl border-none font-medium" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
-
-        <button onClick={() => signOut(auth).then(() => navigate('/'))} className="bg-red-50 text-red-500 p-3 rounded-2xl">
-          <LogOut size={20}/>
-        </button>
+        <button onClick={() => signOut(auth).then(() => navigate('/'))} className="text-red-500 bg-red-50 p-3 rounded-2xl"><LogOut/></button>
       </div>
 
-      {/* Date Filter & Results Summary (Point 4) */}
-      <div className="bg-green-800 p-6 rounded-[2rem] text-white flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl">
-        <div className="flex items-center gap-4">
-          <div className="bg-white/10 p-3 rounded-2xl">
-            <Calendar size={24}/>
-          </div>
-          <div>
-            <p className="text-[10px] font-black uppercase opacity-60 tracking-widest">Filter Records by Date</p>
-            <input 
-              type="date" 
-              className="bg-transparent border-none text-xl font-bold focus:ring-0 cursor-pointer" 
-              onChange={(e) => setDateSearch(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="flex gap-8 text-center md:text-right">
-          <div>
-            <p className="text-[10px] font-black uppercase opacity-60">Patients Seen</p>
-            <p className="text-3xl font-black">{filteredRecords.length}</p>
-          </div>
-          <div>
-            <p className="text-[10px] font-black uppercase opacity-60">Revenue Collected</p>
-            <p className="text-3xl font-black">₹{totalRevenue}</p>
-          </div>
-          {dateSearch && (
-            <button onClick={() => setDateSearch('')} className="bg-white/20 p-2 rounded-xl hover:bg-white/30 transition-all">
-              <Trash2 size={16}/>
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Patient Directory */}
-        <div className="lg:col-span-2 bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden h-fit">
-          <div className="p-6 font-black text-slate-800 border-b border-slate-50 flex items-center gap-2">
-            <Users size={18} className="text-green-600"/> Patient Directory
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                <tr>
-                  <th className="p-5">Patient Details</th>
-                  <th className="p-5">Clinical Note</th>
-                  <th className="p-5 text-right">Actions</th>
+      <div className="grid lg:grid-cols-3 gap-6 print:hidden">
+        {/* Patient Table */}
+        <div className="lg:col-span-2 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-6 font-black border-b text-slate-800">Patient Directory</div>
+          <table className="w-full text-left">
+            <tbody className="divide-y">
+              {filteredPatients.map(p => (
+                <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-5">
+                    <div className="font-bold text-slate-900">{p.full_name}</div>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                      {p.nextSession ? `Next: ${p.nextSession.date} @ ${p.nextSession.time}` : 'No Session Set'}
+                    </div>
+                  </td>
+                  <td className="p-5 text-right space-x-2">
+                    <button onClick={() => openModal('schedule', p)} className="bg-purple-50 text-purple-600 p-2.5 rounded-xl"><Clock size={16}/></button>
+                    <button onClick={() => openModal('note', p)} className="bg-orange-50 text-orange-600 p-2.5 rounded-xl"><MessageSquare size={16}/></button>
+                    <button onClick={() => openModal('exercise', p)} className="bg-blue-50 text-blue-600 p-2.5 rounded-xl"><Activity size={16}/></button>
+                    <button onClick={() => openModal('bill', p)} className="bg-green-50 text-green-700 p-2.5 rounded-xl"><CreditCard size={16}/></button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredPatients.map(p => (
-                  <tr key={p.id} className="hover:bg-slate-50/50 transition-all">
-                    <td className="p-5">
-                      <div className="font-bold text-slate-900">{p.full_name}</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">ID: {p.id.slice(0, 8)} • {p.age}Y • {p.gender}</div>
-                    </td>
-                    <td className="p-5">
-                      <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-3 py-1 rounded-full uppercase">{p.condition}</span>
-                    </td>
-                    <td className="p-5 text-right space-x-2">
-                      <button onClick={() => setSelectedPatient(p)} className="bg-slate-100 text-slate-600 p-2 rounded-xl hover:bg-green-800 hover:text-white transition-all"><Video size={16}/></button>
-                      <button onClick={() => {setSelectedPatient(p); setShowBillModal(true);}} className="bg-green-50 text-green-700 p-2 rounded-xl hover:bg-green-700 hover:text-white transition-all"><CreditCard size={16}/></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        {/* Daily Flow Records (Point 2) */}
+        {/* Recent Activity */}
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-black text-slate-800 uppercase text-xs flex items-center gap-2">
-              <Clock size={16} className="text-green-600"/> {dateSearch ? `Records for ${dateSearch}` : 'Recent Patient Flow'}
-            </h3>
-          </div>
-          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-            {filteredRecords.map(record => (
-              <div key={record.id} className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-bold text-slate-900 text-sm">{record.patient_name}</div>
-                  <div className="text-green-800 font-black">₹{record.amount}</div>
-                </div>
-                <div className="text-[10px] text-slate-500 font-bold uppercase mb-3">
-                  {record.patient_condition} • {record.method}
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-50 pt-2 text-[9px] font-black text-slate-400">
-                  <span>{record.date}</span>
-                  <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded uppercase">{record.status}</span>
+          <h3 className="font-black text-xs uppercase px-2 text-slate-400">Recent Revenue</h3>
+          {filteredRecords.slice(0, 6).map(record => (
+            <div key={record.id} className="bg-white p-4 rounded-3xl border flex justify-between items-center shadow-sm">
+              <div><p className="font-bold text-sm text-slate-900">{record.patient_name}</p><p className="text-[10px] text-slate-400 font-bold uppercase">₹{record.amount} • {record.date}</p></div>
+              <button onClick={() => handlePrint(record)} className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:text-green-600 transition-colors"><FileText size={18}/></button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ALL MODALS (With Safety Check) */}
+      {modalType && selectedPatient && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6 z-50 print:hidden">
+          <div className={`bg-white p-8 rounded-[2.5rem] w-full shadow-2xl ${modalType === 'exercise' ? 'max-w-2xl' : 'max-w-md'}`}>
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="font-black text-xl text-slate-800 capitalize">{modalType} Management</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patient: {selectedPatient.full_name}</p>
+              </div>
+              <button onClick={() => setModalType(null)} className="p-2 bg-slate-50 rounded-full text-slate-400"><X size={20}/></button>
+            </div>
+
+            {/* Conditionally Render Content */}
+            {modalType === 'exercise' && (
+              <div className="grid md:grid-cols-2 gap-8">
+                <form onSubmit={async (e) => { 
+                  e.preventDefault(); 
+                  await addDoc(collection(db, "exercises"), {...exerciseForm, patient_id: selectedPatient.id}); 
+                  loadExercises(selectedPatient.id);
+                  setExerciseForm({ name: '', sets: '', reps: '', videoUrl: '' });
+                }} className="space-y-4">
+                  <input required placeholder="Exercise Name" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-medium" value={exerciseForm.name} onChange={e => setExerciseForm({...exerciseForm, name: e.target.value})} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <input required placeholder="Sets" className="p-4 bg-slate-50 rounded-2xl border-none font-medium" value={exerciseForm.sets} onChange={e => setExerciseForm({...exerciseForm, sets: e.target.value})} />
+                    <input required placeholder="Reps" className="p-4 bg-slate-50 rounded-2xl border-none font-medium" value={exerciseForm.reps} onChange={e => setExerciseForm({...exerciseForm, reps: e.target.value})} />
+                  </div>
+                  <input placeholder="YouTube URL" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-medium" value={exerciseForm.videoUrl} onChange={e => setExerciseForm({...exerciseForm, videoUrl: e.target.value})} />
+                  <button className="w-full bg-green-800 text-white p-4 rounded-2xl font-black shadow-lg">Assign Plan</button>
+                </form>
+                <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
+                  <h4 className="font-black text-xs uppercase text-slate-400">Currently Assigned</h4>
+                  {patientExercises.map(ex => (
+                    <div key={ex.id} className="bg-slate-50 p-4 rounded-2xl flex justify-between items-center border border-slate-100">
+                      <div><p className="font-bold text-sm">{ex.name}</p><p className="text-[10px] font-black text-slate-400">{ex.sets} Sets • {ex.reps} Reps</p></div>
+                      <button onClick={() => deleteExercise(ex.id)} className="text-red-400 hover:text-red-600 transition-colors"><Trash2 size={18}/></button>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
-            {filteredRecords.length === 0 && (
-              <div className="text-center py-10 bg-white rounded-3xl border border-dashed border-slate-200 text-slate-400 font-bold text-sm">
-                No records found for this criteria
-              </div>
+            )}
+
+            {modalType === 'schedule' && (
+              <form onSubmit={handleSchedule} className="space-y-4">
+                <input required type="date" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" onChange={e => setAppointment({...appointment, date: e.target.value})} />
+                <input required type="time" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" onChange={e => setAppointment({...appointment, time: e.target.value})} />
+                <button className="w-full bg-purple-600 text-white p-4 rounded-2xl font-black shadow-lg">Confirm Appointment</button>
+              </form>
+            )}
+
+            {modalType === 'note' && (
+              <form onSubmit={handleSaveNote} className="space-y-4">
+                <textarea required className="w-full h-40 p-4 bg-slate-50 rounded-2xl border-none font-medium" placeholder="Clinical progress observations..." value={progressNote} onChange={e => setProgressNote(e.target.value)} />
+                <button className="w-full bg-orange-600 text-white p-4 rounded-2xl font-black shadow-lg">Save Note</button>
+              </form>
+            )}
+
+            {modalType === 'bill' && (
+              <form onSubmit={handleAddBill} className="space-y-4">
+                <input required type="date" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" value={billForm.date} onChange={e => setBillForm({...billForm, date: e.target.value})} />
+                <input required placeholder="Amount (₹)" type="number" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold text-lg" onChange={e => setBillForm({...billForm, amount: e.target.value})} />
+                <button className="w-full bg-green-800 text-white p-4 rounded-2xl font-black shadow-lg">Generate Entry</button>
+              </form>
             )}
           </div>
         </div>
-      </div>
-
-      {/* Improved Billing Modal (Point 1) */}
-      {showBillModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6 z-[100]">
-          <form onSubmit={handleAddBill} className="bg-white p-8 rounded-[2.5rem] w-full max-w-md space-y-4 shadow-2xl animate-in zoom-in-95">
-            <h3 className="font-black text-xl text-green-900">Add New Billing Record</h3>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Patient: {selectedPatient?.full_name}</p>
-            
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Consultation Date</label>
-              <input 
-                required 
-                type="date" 
-                className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold"
-                value={billForm.date}
-                onChange={e => setBillForm({...billForm, date: e.target.value})}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Fee Amount (₹)</label>
-              <input required type="number" placeholder="500" className="w-full p-4 bg-slate-50 rounded-2xl border-none font-bold" onChange={e => setBillForm({...billForm, amount: e.target.value})} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <select className="p-4 bg-slate-50 rounded-2xl border-none font-bold text-sm" value={billForm.method} onChange={e => setBillForm({...billForm, method: e.target.value})}>
-                <option value="GPay">GPay</option>
-                <option value="Cash">Cash</option>
-                <option value="Card">Card</option>
-              </select>
-              <select className="p-4 bg-slate-50 rounded-2xl border-none font-bold text-sm" value={billForm.status} onChange={e => setBillForm({...billForm, status: e.target.value})}>
-                <option value="Paid">Paid</option>
-                <option value="Pending">Pending</option>
-              </select>
-            </div>
-
-            <button type="submit" className="w-full bg-green-800 text-white p-4 rounded-2xl font-black shadow-lg hover:bg-green-900 transition-all">Submit Entry</button>
-            <button type="button" onClick={() => setShowBillModal(false)} className="w-full text-slate-400 font-bold text-sm">Go Back</button>
-          </form>
-        </div>
       )}
 
-      {/* Exercise Modal remains the same */}
+      {/* PRINT RECEIPT (Only visible during print) */}
+      {activeReceipt && (
+        <div className="hidden print:block p-12 text-slate-900 bg-white min-h-screen">
+          <div className="flex justify-between border-b-2 pb-8 border-slate-100">
+            <div><h1 className="text-3xl font-black text-green-800 italic">Eshaa Physio Care</h1><p className="text-xs font-bold text-slate-400 tracking-widest uppercase">Official Payment Receipt</p></div>
+            <div className="text-right font-bold text-xs"><p>No: EPC-{activeReceipt.id?.slice(0,6).toUpperCase()}</p><p>Date: {activeReceipt.date}</p></div>
+          </div>
+          <div className="my-10"><p className="text-[10px] font-black uppercase text-slate-400">Bill To</p><p className="text-xl font-black">{activeReceipt.patient_name}</p><p className="text-xs font-bold text-slate-500">Condition: {activeReceipt.patient_condition}</p></div>
+          <table className="w-full mt-10"><tr className="border-b text-left text-xs uppercase font-black"><th className="py-4">Service</th><th className="py-4 text-right">Amount</th></tr><tr><td className="py-8 font-black">Physiotherapy Consultation & Session</td><td className="py-8 text-right font-black text-xl">₹{activeReceipt.amount}</td></tr></table>
+          <div className="mt-32 flex justify-between items-end"><p className="text-[9px] text-slate-400 italic font-medium">* Electronic computer generated receipt.</p><div className="text-right"><div className="w-32 border-b border-slate-300 ml-auto mb-2"></div><p className="text-[9px] font-black uppercase tracking-tighter">Authorized Clinic Signature</p></div></div>
+        </div>
+      )}
     </div>
   );
 }
